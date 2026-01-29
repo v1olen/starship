@@ -1,4 +1,5 @@
 use process_control::{ChildExt, Control};
+use std::env;
 use std::ffi::OsStr;
 use std::fmt::Debug;
 use std::fs::read_to_string;
@@ -119,6 +120,56 @@ pub fn create_command<T: AsRef<OsStr>>(binary_name: T) -> Result<Command> {
         .stdin(Stdio::null());
 
     Ok(cmd)
+}
+
+/// Detects if we're in a Nix shell using the same logic as the nix_shell module
+/// Returns true if IN_NIX_SHELL is set or if PATH contains /nix/store paths
+pub fn is_in_nix_shell() -> bool {
+    if let Ok(in_nix_shell) = env::var("IN_NIX_SHELL") {
+        if in_nix_shell == "pure" || in_nix_shell == "impure" {
+            return true;
+        }
+    }
+
+    if let Ok(path) = env::var("PATH") {
+        return env::split_paths(&path)
+            .any(|path| path.starts_with("/nix/store"));
+    }
+
+    false
+}
+
+/// Creates a command with nix develop wrapper if we're in a Nix shell environment
+/// This allows version checks to use the Nix environment instead of system environment
+pub fn create_command_in_dir<T: AsRef<OsStr>>(binary_name: T, current_dir: &Path) -> Result<Command> {
+    let binary_name = binary_name.as_ref();
+
+    if is_in_nix_shell() {
+        log::trace!("Nix shell detected, wrapping command with 'nix develop -c'");
+
+        let nix_path = match which::which("nix") {
+            Ok(path) => path,
+            Err(error) => {
+                log::trace!("Unable to find 'nix' in PATH, falling back to direct command: {error:?}");
+                return create_command(binary_name);
+            }
+        };
+
+        let binary_name_only = Path::new(binary_name)
+            .file_name()
+            .unwrap_or(binary_name);
+
+        #[allow(clippy::disallowed_methods)]
+        let mut cmd = Command::new(nix_path);
+        cmd.args(["develop", "-c", &binary_name_only.to_string_lossy()])
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stdin(Stdio::null());
+
+        Ok(cmd)
+    } else {
+        create_command(binary_name)
+    }
 }
 
 #[derive(Debug, Clone)]

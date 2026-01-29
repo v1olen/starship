@@ -2,7 +2,7 @@ use crate::config::{ModuleConfig, StarshipConfig};
 use crate::configs::StarshipRootConfig;
 use crate::context_env::Env;
 use crate::module::Module;
-use crate::utils::{CommandOutput, PathExt, create_command, exec_timeout, read_file};
+use crate::utils::{CommandOutput, PathExt, create_command, exec_timeout, read_file, is_in_nix_shell};
 
 use crate::modules;
 use crate::utils;
@@ -447,12 +447,30 @@ impl<'a> Context<'a> {
                 return output;
             }
         }
-        let mut cmd = create_command(cmd).ok()?;
-        cmd.args(args).current_dir(&self.current_dir);
-        exec_timeout(
-            &mut cmd,
-            Duration::from_millis(self.root_config.command_timeout),
-        )
+
+        if is_in_nix_shell() {
+            log::trace!("Nix shell detected, proxying command through 'nix develop -c'");
+            let mut nix_cmd = create_command("nix").ok()?;
+
+            let cmd_str = cmd.as_ref().to_string_lossy().to_string();
+            let mut nix_args = vec![OsString::from("develop"), OsString::from("-c"), OsString::from(cmd_str)];
+            nix_args.extend(args.iter().map(|a| a.as_ref().to_os_string()));
+
+            nix_cmd.args(&nix_args).current_dir(&self.current_dir);
+
+            exec_timeout(
+                &mut nix_cmd,
+                Duration::from_millis(self.root_config.command_timeout),
+            )
+        } else {
+            let mut cmd = create_command(cmd).ok()?;
+            cmd.args(args).current_dir(&self.current_dir);
+
+            exec_timeout(
+                &mut cmd,
+                Duration::from_millis(self.root_config.command_timeout),
+            )
+        }
     }
 
     /// Attempt to execute several commands with `exec_cmd`, return the results of the first that works

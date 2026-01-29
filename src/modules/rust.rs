@@ -9,7 +9,7 @@ use super::{Context, Module, ModuleConfig};
 
 use crate::configs::rust::RustConfig;
 use crate::formatter::{StringFormatter, VersionFormatter};
-use crate::utils::create_command;
+use crate::utils::create_command_in_dir;
 use home::rustup_home;
 
 use std::sync::OnceLock;
@@ -104,7 +104,7 @@ impl RustToolingEnvironmentInfo {
                     })
                     .and_then(|rustc| {
                         log::trace!("Running rustc --version directly with {rustc:?}");
-                        create_command(rustc).map(|mut cmd| {
+                        create_command_in_dir(rustc, &context.current_dir).map(|mut cmd| {
                             cmd.arg("--version");
                             cmd
                         })
@@ -113,7 +113,7 @@ impl RustToolingEnvironmentInfo {
                         // If that fails, try running rustup rustup run <toolchain> rustc --version
                         // Depending on the source of the toolchain override, it might not have been a full toolchain name ("stable" or "nightly").
                         log::trace!("Running rustup {toolchain} rustc --version");
-                        create_command("rustup").map(|mut cmd| {
+                        create_command_in_dir("rustup", &context.current_dir).map(|mut cmd| {
                             cmd.args(["run", toolchain, "rustc", "--version"]);
                             cmd
                         })
@@ -136,7 +136,7 @@ impl RustToolingEnvironmentInfo {
 
         self.rustc_verbose_output
             .get_or_init(|| {
-                let Output { status, stdout, .. } = create_command("rustc")
+                let Output { status, stdout, .. } = create_command_in_dir("rustc", &context.current_dir)
                     .and_then(|mut cmd| {
                         cmd.args(["-Vv"]).current_dir(&context.current_dir).output()
                     })
